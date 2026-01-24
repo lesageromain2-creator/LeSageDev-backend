@@ -1,4 +1,4 @@
-// backend/routes/reservations.js - VERSION JWT
+// backend/routes/reservations.js - VERSION JWT (Rendez-vous consultation)
 const express = require('express');
 const router = express.Router();
 const { requireAuth, requireAdmin } = require('../middleware/auths');
@@ -21,36 +21,25 @@ router.post('/check-availability', async (req, res) => {
   const pool = req.app.locals.pool;
   
   try {
-    const { reservation_date, reservation_time, number_of_people } = req.body;
+    const { reservation_date, reservation_time } = req.body;
 
-    if (!reservation_date || !reservation_time || !number_of_people) {
-      return res.status(400).json({ error: 'Paramètres manquants' });
+    if (!reservation_date || !reservation_time) {
+      return res.status(400).json({ error: 'Date et heure requises' });
     }
 
-    const hour = parseInt(reservation_time.split(':')[0]);
-    const isLunchTime = hour >= 12 && hour < 15;
-
-    const availabilityResult = await query(pool,
-      `SELECT COALESCE(SUM(number_of_people), 0) as total_people
-       FROM reservations 
+    // Vérifier s'il y a déjà un rendez-vous à cette heure
+    const existingReservation = await queryOne(pool,
+      `SELECT id FROM reservations 
        WHERE reservation_date = $1
-       AND reservation_time BETWEEN $2 AND $3
+       AND reservation_time = $2
        AND status IN ('confirmed', 'pending')`,
-      [
-        reservation_date,
-        isLunchTime ? '12:00:00' : '19:00:00',
-        isLunchTime ? '14:30:00' : '22:30:00'
-      ]
+      [reservation_date, reservation_time]
     );
 
-    const totalPeople = parseInt(availabilityResult[0].total_people);
-    const availableSeats = 50 - totalPeople;
-    const isAvailable = availableSeats >= parseInt(number_of_people);
-
     res.json({
-      available: isAvailable,
-      available_seats: availableSeats,
-      requested_seats: parseInt(number_of_people)
+      available: !existingReservation,
+      date: reservation_date,
+      time: reservation_time
     });
   } catch (error) {
     console.error('Erreur check availability:', error);
@@ -59,32 +48,29 @@ router.post('/check-availability', async (req, res) => {
 });
 
 // ============================================
-// CRÉER UNE RÉSERVATION (JWT AUTH)
+// CRÉER UN RENDEZ-VOUS (JWT AUTH)
 // ============================================
 router.post('/', requireAuth, async (req, res) => {
   const pool = req.app.locals.pool;
-  const userId = req.userId; // ✅ JWT
+  const userId = req.userId;
   
   try {
     const {
       reservation_date,
       reservation_time,
-      number_of_people,
-      special_requests
+      meeting_type,
+      project_type,
+      estimated_budget,
+      message
     } = req.body;
 
-    console.log('📝 Création réservation pour user:', userId);
+    console.log('📝 Création rendez-vous pour user:', userId);
+    console.log('📋 Données reçues:', req.body);
 
-    // Validation
-    if (!reservation_date || !reservation_time || !number_of_people) {
+    // Validation des champs requis
+    if (!reservation_date || !reservation_time) {
       return res.status(400).json({ 
-        error: 'Date, heure et nombre de personnes requis' 
-      });
-    }
-
-    if (number_of_people < 1 || number_of_people > 20) {
-      return res.status(400).json({ 
-        error: 'Le nombre de personnes doit être entre 1 et 20' 
+        error: 'Date et heure du rendez-vous requis' 
       });
     }
 
@@ -92,69 +78,62 @@ router.post('/', requireAuth, async (req, res) => {
     const reservationDateTime = new Date(`${reservation_date}T${reservation_time}`);
     if (reservationDateTime < new Date()) {
       return res.status(400).json({ 
-        error: 'La date de réservation doit être future' 
+        error: 'La date du rendez-vous doit être dans le futur' 
       });
     }
 
-    // Vérifier horaires
-    const [hour, minute] = reservation_time.split(':').map(Number);
-    const timeInMinutes = hour * 60 + minute;
-    const lunchStart = 12 * 60;
-    const lunchEnd = 14 * 60 + 30;
-    const dinnerStart = 19 * 60;
-    const dinnerEnd = 22 * 60 + 30;
-    const isLunchTime = timeInMinutes >= lunchStart && timeInMinutes <= lunchEnd;
-    const isDinnerTime = timeInMinutes >= dinnerStart && timeInMinutes <= dinnerEnd;
-
-    if (!isLunchTime && !isDinnerTime) {
+    // Vérifier horaires de travail (9h-18h)
+    const [hour] = reservation_time.split(':').map(Number);
+    if (hour < 9 || hour >= 18) {
       return res.status(400).json({ 
-        error: 'Horaires de réservation : 12h-14h30 et 19h-22h30' 
+        error: 'Horaires disponibles : 9h00 - 18h00' 
       });
     }
 
-    // Vérifier disponibilité
-    const availabilityResult = await query(pool,
-      `SELECT COALESCE(SUM(number_of_people), 0) as total_people
-       FROM reservations 
+    // Vérifier si le créneau est disponible
+    const existingReservation = await queryOne(pool,
+      `SELECT id FROM reservations 
        WHERE reservation_date = $1
-       AND reservation_time BETWEEN $2 AND $3
+       AND reservation_time = $2
        AND status IN ('confirmed', 'pending')`,
+      [reservation_date, reservation_time]
+    );
+
+    if (existingReservation) {
+      return res.status(400).json({ 
+        error: 'Ce créneau n\'est plus disponible, veuillez en choisir un autre'
+      });
+    }
+
+    // Créer le rendez-vous
+    const result = await query(pool,
+      `INSERT INTO reservations 
+       (user_id, reservation_date, reservation_time, meeting_type, project_type, estimated_budget, message, status) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
+       RETURNING *`,
       [
-        reservation_date,
-        isLunchTime ? '12:00:00' : '19:00:00',
-        isLunchTime ? '14:30:00' : '22:30:00'
+        userId, 
+        reservation_date, 
+        reservation_time, 
+        meeting_type || 'visio',
+        project_type || null,
+        estimated_budget || null,
+        message || null
       ]
     );
 
-    const totalPeople = parseInt(availabilityResult[0].total_people);
-    if (totalPeople + parseInt(number_of_people) > 50) {
-      return res.status(400).json({ 
-        error: 'Plus de disponibilité pour ce créneau',
-        available_seats: 50 - totalPeople
-      });
-    }
-
-    // Créer la réservation
-    const result = await query(pool,
-      `INSERT INTO reservations 
-       (user_id, reservation_date, reservation_time, number_of_people, special_requests, status) 
-       VALUES ($1, $2, $3, $4, $5, 'pending')
-       RETURNING id, user_id, reservation_date, reservation_time, number_of_people, status, created_at`,
-      [userId, reservation_date, reservation_time, number_of_people, special_requests || null]
-    );
-
-    console.log('✅ Réservation créée:', result[0]);
+    console.log('✅ Rendez-vous créé:', result[0]);
 
     res.status(201).json({
       success: true,
-      message: 'Réservation créée avec succès',
+      message: 'Rendez-vous créé avec succès',
       reservation: result[0]
     });
   } catch (error) {
     console.error('❌ Erreur create reservation:', error);
     res.status(500).json({ 
       success: false,
-      error: 'Erreur serveur' 
+      error: 'Erreur serveur lors de la création du rendez-vous' 
     });
   }
 });

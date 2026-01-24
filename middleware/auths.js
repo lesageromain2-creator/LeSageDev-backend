@@ -102,6 +102,8 @@ const requireAdmin = async (req, res, next) => {
   }
 };
 
+
+
 // ============================================
 // MIDDLEWARE - Rôle Staff requis
 // ============================================
@@ -357,3 +359,6 @@ module.exports = {
   attachUser,
   requireOwnership
 };
+
+
+

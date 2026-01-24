@@ -1,8 +1,8 @@
 // backend/routes/users.js - VERSION JWT
 const express = require('express');
-const bcrypt = require('bcrypt'); // ✅ UTILISER bcrypt (pas bcryptjs)
-const { query, queryOne } = require('../database/db');
-const { requireAuth, requireAdmin } = require('../middleware/auths'); // ✅ Import JWT middleware
+const bcrypt = require('bcrypt');
+const { query, queryOne, getPool } = require('../database/db'); // ✅ Ajouter getPool
+const { requireAuth, requireAdmin } = require('../middleware/auths');
 
 const router = express.Router();
 
@@ -15,7 +15,7 @@ router.get('/me', requireAuth, async (req, res) => {
       `SELECT id, email, firstname, lastname, phone, role, 
               email_verified, avatar_url, created_at, last_login
        FROM users WHERE id = $1`,
-      [req.userId] // ✅ JWT: req.userId au lieu de req.session.userId
+      [req.userId]
     );
 
     if (!user) {
@@ -36,7 +36,7 @@ router.get('/profile', requireAuth, async (req, res) => {
       `SELECT id, email, firstname, lastname, phone, role, 
               email_verified, avatar_url, created_at, last_login
        FROM users WHERE id = $1`,
-      [req.userId] // ✅ JWT
+      [req.userId]
     );
 
     if (!user) {
@@ -57,7 +57,6 @@ router.put('/me', requireAuth, async (req, res) => {
   try {
     const { firstname, lastname, phone } = req.body;
 
-    // Validation
     if (!firstname || !lastname) {
       return res.status(400).json({ 
         error: 'Prénom et nom sont requis' 
@@ -68,12 +67,12 @@ router.put('/me', requireAuth, async (req, res) => {
       `UPDATE users 
        SET firstname = $1, lastname = $2, phone = $3, updated_at = CURRENT_TIMESTAMP
        WHERE id = $4`,
-      [firstname, lastname, phone || null, req.userId] // ✅ JWT
+      [firstname, lastname, phone || null, req.userId]
     );
 
     const updatedUser = await queryOne(
       'SELECT id, email, firstname, lastname, phone, role FROM users WHERE id = $1',
-      [req.userId] // ✅ JWT
+      [req.userId]
     );
 
     res.json({
@@ -101,12 +100,12 @@ router.put('/profile', requireAuth, async (req, res) => {
       `UPDATE users 
        SET firstname = $1, lastname = $2, phone = $3, updated_at = CURRENT_TIMESTAMP
        WHERE id = $4`,
-      [firstname, lastname, phone || null, req.userId] // ✅ JWT
+      [firstname, lastname, phone || null, req.userId]
     );
 
     const updatedUser = await queryOne(
       'SELECT id, email, firstname, lastname, phone, role FROM users WHERE id = $1',
-      [req.userId] // ✅ JWT
+      [req.userId]
     );
 
     res.json({
@@ -126,7 +125,6 @@ router.put('/me/password', requireAuth, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
 
-    // Validation
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ 
         error: 'Mot de passe actuel et nouveau mot de passe requis' 
@@ -139,30 +137,26 @@ router.put('/me/password', requireAuth, async (req, res) => {
       });
     }
 
-    // Récupérer l'utilisateur
     const user = await queryOne(
       'SELECT id, password_hash FROM users WHERE id = $1',
-      [req.userId] // ✅ JWT
+      [req.userId]
     );
 
     if (!user) {
       return res.status(404).json({ error: 'Utilisateur non trouvé' });
     }
 
-    // Vérifier le mot de passe actuel
     const isValidPassword = await bcrypt.compare(currentPassword, user.password_hash);
 
     if (!isValidPassword) {
       return res.status(401).json({ error: 'Mot de passe actuel incorrect' });
     }
 
-    // Hasher le nouveau mot de passe
     const newPasswordHash = await bcrypt.hash(newPassword, 10);
 
-    // Mettre à jour le mot de passe
     await query(
       'UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-      [newPasswordHash, req.userId] // ✅ JWT
+      [newPasswordHash, req.userId]
     );
 
     res.json({ message: 'Mot de passe changé avec succès' });
@@ -191,7 +185,7 @@ router.put('/password', requireAuth, async (req, res) => {
 
     const user = await queryOne(
       'SELECT id, password_hash FROM users WHERE id = $1',
-      [req.userId] // ✅ JWT
+      [req.userId]
     );
 
     if (!user) {
@@ -208,7 +202,7 @@ router.put('/password', requireAuth, async (req, res) => {
 
     await query(
       'UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-      [newPasswordHash, req.userId] // ✅ JWT
+      [newPasswordHash, req.userId]
     );
 
     res.json({ message: 'Mot de passe changé avec succès' });
@@ -231,10 +225,9 @@ router.delete('/me/account', requireAuth, async (req, res) => {
       });
     }
 
-    // Vérifier le mot de passe
     const user = await queryOne(
       'SELECT id, password_hash FROM users WHERE id = $1',
-      [req.userId] // ✅ JWT
+      [req.userId]
     );
 
     if (!user) {
@@ -247,10 +240,9 @@ router.delete('/me/account', requireAuth, async (req, res) => {
       return res.status(401).json({ error: 'Mot de passe incorrect' });
     }
 
-    // Désactiver le compte plutôt que de le supprimer
     await query(
       'UPDATE users SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
-      [req.userId] // ✅ JWT
+      [req.userId]
     );
 
     res.json({ message: 'Compte désactivé avec succès' });
@@ -273,7 +265,7 @@ router.delete('/account', requireAuth, async (req, res) => {
 
     const user = await queryOne(
       'SELECT id, password_hash FROM users WHERE id = $1',
-      [req.userId] // ✅ JWT
+      [req.userId]
     );
 
     if (!user) {
@@ -288,7 +280,7 @@ router.delete('/account', requireAuth, async (req, res) => {
 
     await query(
       'UPDATE users SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
-      [req.userId] // ✅ JWT
+      [req.userId]
     );
 
     res.json({ message: 'Compte désactivé avec succès' });
@@ -310,12 +302,68 @@ router.get('/stats', requireAuth, async (req, res) => {
         COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled_reservations
        FROM reservations
        WHERE user_id = $1`,
-      [req.userId] // ✅ JWT
+      [req.userId]
     );
 
     res.json(stats);
   } catch (error) {
     console.error('Erreur get stats:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ============================================
+// GET /users/messages - Messages contact de l'utilisateur
+// ============================================
+router.get('/messages', requireAuth, async (req, res) => {
+  try {
+    const pool = getPool();
+    
+    // Récupérer d'abord l'email de l'utilisateur depuis son ID
+    const userResult = await pool.query(
+      'SELECT email FROM users WHERE id = $1',
+      [req.userId]
+    );
+
+    if (!userResult.rows[0]) {
+      return res.status(404).json({ error: 'Utilisateur non trouvé' });
+    }
+
+    const userEmail = userResult.rows[0].email;
+    console.log('📬 Récupération messages pour:', userEmail);
+
+    // Récupérer tous les messages envoyés avec cet email
+    const messagesResult = await pool.query(`
+      SELECT 
+        cm.*,
+        (
+          SELECT json_agg(
+            json_build_object(
+              'id', cmr.id,
+              'reply_text', cmr.reply_text,
+              'created_at', cmr.created_at,
+              'admin_name', u.firstname || ' ' || u.lastname
+            )
+            ORDER BY cmr.created_at ASC
+          )
+          FROM contact_message_replies cmr
+          LEFT JOIN users u ON cmr.admin_id = u.id
+          WHERE cmr.message_id = cm.id
+        ) as replies
+      FROM contact_messages cm
+      WHERE cm.email = $1
+      ORDER BY cm.created_at DESC
+    `, [userEmail]);
+
+    console.log(`✅ ${messagesResult.rows.length} messages trouvés`);
+
+    res.json({
+      success: true,
+      messages: messagesResult.rows
+    });
+
+  } catch (error) {
+    console.error('❌ Erreur récupération messages:', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -367,14 +415,12 @@ router.get('/:id', requireAdmin, async (req, res) => {
 // ============================================
 router.delete('/:id', requireAdmin, async (req, res) => {
   try {
-    // Vérifier que l'admin ne se supprime pas lui-même
-    if (req.params.id === req.userId) { // ✅ JWT
+    if (req.params.id === req.userId) {
       return res.status(400).json({ 
         error: 'Vous ne pouvez pas supprimer votre propre compte' 
       });
     }
 
-    // Désactiver le compte
     await query(
       'UPDATE users SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
       [req.params.id]
@@ -412,4 +458,4 @@ router.put('/:id/role', requireAdmin, async (req, res) => {
   }
 });
 
-module.exports = router;
+module.exports = router; // ✅ ESSENTIEL !
